@@ -17,3 +17,7 @@ Notes
 - Lists are stored only on the phone. Use Overview > Save backup (copies text you can paste into Notes).
 - To update later: change files in the repository, then run the workflow again and install the new APK over the old one.
 - If the build shows a red cross, open the failed step, copy the error text and send it to Claude.
+
+
+PHOTO PICKER UPDATE
+The item photo button now displays an in-app choice: Take Photo or Choose from Album. The Android build includes the Capacitor Camera plugin and uses the native Photos picker for the album option.

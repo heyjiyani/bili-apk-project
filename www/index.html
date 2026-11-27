@@ -125,7 +125,7 @@ h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-backgro
   <div class="row">
     <input class="inp" id="iname" placeholder="Item name" maxlength="40">
     <button class="cam" id="camBtn" title="Snap the price tag">📷</button>
-    <input type="file" id="file" accept="image/*" capture="environment" hidden>
+    <input type="file" id="file" accept="image/*" hidden>
   </div>
   <div class="sug" id="sug"></div><p class="note" id="hint" style="display:none"></p>
   <p class="note" id="scanmsg" style="display:none"></p>
@@ -142,6 +142,15 @@ h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-backgro
     <button class="u" id="camX" style="flex:none;padding:12px 18px">Cancel</button>
     <button id="snap" aria-label="Take photo" style="width:74px;height:74px;border-radius:50%;border:5px solid #fff;background:linear-gradient(135deg,#ff5a3c,#7c4dff);cursor:pointer"></button>
     <button class="u" id="camUp" style="flex:none;padding:12px 18px">Upload</button>
+  </div>
+</div>
+<div id="photoChoice" style="position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:60;display:none;align-items:center;justify-content:center;padding:24px">
+  <div style="width:min(100%,360px);background:var(--card,#fff);color:var(--text,#222);border-radius:22px;padding:22px;box-shadow:0 18px 55px rgba(0,0,0,.3)">
+    <h3 style="margin:0 0 8px;font-size:19px">Add a photo</h3>
+    <p style="margin:0 0 18px;opacity:.72;font-size:14px">Choose where to get your item photo.</p>
+    <button id="chooseCamera" style="width:100%;padding:15px;border:0;border-radius:13px;background:#7653e8;color:white;font-weight:700;font-size:16px;margin-bottom:10px">📷 Take Photo</button>
+    <button id="chooseAlbum" style="width:100%;padding:15px;border:1px solid #aaa;border-radius:13px;background:transparent;color:inherit;font-weight:700;font-size:16px">🖼️ Choose from Album</button>
+    <button id="chooseCancel" style="width:100%;padding:12px;border:0;background:transparent;color:inherit;opacity:.7;margin-top:8px">Cancel</button>
   </div>
 </div>
 <script>
@@ -226,32 +235,60 @@ $("ov").onclick=e=>{if(e.target===$("ov")){editing=null;$("ov").classList.remove
 function openEdit(it){editing=it;unit=it.unit;qty=it.qty;price=String(it.price);photo=it.img||null;$("iname").value=it.name;$("camBtn").innerHTML=photo?`<img src="${photo}" alt="">`:"📷";const m=$("scanmsg");m.style.display="";m.textContent="Editing this item. Change anything, then tap ✓ to save.";$("sug").innerHTML="";$("sug").className="sug";upd();$("ov").classList.add("on")}
 let stream=null;
 function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$("camov").style.display="none"}
-$("camBtn").onclick=async()=>{
+function showPhotoChoice(){$("photoChoice").style.display="flex"}
+function hidePhotoChoice(){$("photoChoice").style.display="none"}
+async function openLiveCamera(){
+  hidePhotoChoice();
   try{
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw 0;
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920}},audio:false});
     $("vid").srcObject=stream;$("camov").style.display="flex";
   }catch(e){
-    const m=$("scanmsg");m.style.display="";m.textContent="Live camera is blocked here, so pick or take a photo instead.";
+    const m=$("scanmsg");m.style.display="";m.textContent="Camera access is unavailable. You can choose a photo from your album instead.";
+    chooseFromAlbum();
+  }
+}
+async function chooseFromAlbum(){
+  hidePhotoChoice();
+  // Use the native Android photo picker in the APK so Album opens Photos,
+  // not the camera app. The normal file input remains as a web fallback.
+  try{
+    const cameraPlugin=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Camera;
+    if(NATIVE&&cameraPlugin&&cameraPlugin.getPhoto){
+      const result=await cameraPlugin.getPhoto({quality:90,allowEditing:false,resultType:"uri",source:"PHOTOS"});
+      if(result&&result.webPath){
+        const response=await fetch(result.webPath);const blob=await response.blob();
+        const file=new File([blob],"bili-album-photo.jpg",{type:blob.type||"image/jpeg"});
+        processImageFile(file);
+      }
+    }else{$("file").click()}
+  }catch(e){
+    if(e&&e.message&&/cancel/i.test(e.message))return;
     $("file").click();
   }
-};
+}
+$("camBtn").onclick=showPhotoChoice;
+$("chooseCamera").onclick=openLiveCamera;
+$("chooseAlbum").onclick=chooseFromAlbum;
+$("chooseCancel").onclick=hidePhotoChoice;
+$("photoChoice").onclick=e=>{if(e.target===$("photoChoice"))hidePhotoChoice()};
 $("camX").onclick=stopCam;
-$("camUp").onclick=()=>{stopCam();$("file").click()};
+$("camUp").onclick=()=>{stopCam();chooseFromAlbum()};
 $("snap").onclick=()=>{
   const v=$("vid");if(!v.videoWidth)return;
   const c=document.createElement("canvas");c.width=v.videoWidth;c.height=v.videoHeight;
   c.getContext("2d").drawImage(v,0,0);
   c.toBlob(b=>{stopCam();if(b)$("file").onchange({target:{files:[new File([b],"label.jpg",{type:"image/jpeg"})],value:""}})},"image/jpeg",.9);
 };
-$("file").onchange=e=>{
-  const f=e.target.files[0];if(!f)return;
+function processImageFile(f){
+  if(!f)return;
   const im=new Image();im.onload=()=>{
     const c=document.createElement("canvas"),s=Math.min(1,160/Math.max(im.width,im.height));
     c.width=im.width*s;c.height=im.height*s;c.getContext("2d").drawImage(im,0,0,c.width,c.height);
     photo=c.toDataURL("image/jpeg",.7);$("camBtn").innerHTML=`<img src="${photo}" alt="">`;URL.revokeObjectURL(im.src);
-  };scan(f);im.src=URL.createObjectURL(f);e.target.value="";
-};
+  };scan(f);im.src=URL.createObjectURL(f);
+}
+$("file").onchange=e=>{const f=e.target.files[0];processImageFile(f);e.target.value=""};
 let tessP=null;
 const NATIVE=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
 function loadTess(){if(NATIVE&&!window.Tesseract)return tessP||(tessP=new Promise((ok,no)=>{const s=document.createElement("script");s.src="tess/tesseract.min.js";s.onload=ok;s.onerror=()=>{tessP=null;no(new Error("load"))};document.head.appendChild(s)}));return tessP||(tessP=new Promise((ok,no)=>{if(window.Tesseract)return ok();const s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";s.onload=ok;s.onerror=()=>{tessP=null;no(new Error("load"))};document.head.appendChild(s)}))}
@@ -289,7 +326,7 @@ async function scan(f){
     upd();sug();
     m.textContent=(j.name||j.price!=null)?"Read from label. Please check it, set the quantity, then tap ✓.":"Couldn’t read the label. Try a closer, brighter photo.";
   }catch(e){
-    m.textContent="Couldn’t read the label. Connect to the internet once, or enter it manually.";
+    m.textContent="Couldn’t read the label ("+((e&&e.message)||e)+"). Try a closer, brighter photo or type it in.";
   }
 }
 let editing=null,tab="lists",sugs=[],per="last",view="items",lay="grid",srt="new",flt="all",fs="",ff="",ft="";
