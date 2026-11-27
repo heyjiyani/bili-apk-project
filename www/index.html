@@ -332,23 +332,35 @@ async function getOcrWorker(){
       else if(m.status==="recognizing text")setScanStatus("Reading label… "+Math.round((m.progress||0)*100)+"%");
     };
     const opts={logger,errorHandler:e=>{console.error("Tesseract worker error:",e);setScanStatus("OCR worker error: "+((e&&e.message)||String(e)))}};
-if(NATIVE){
-  const base = window.location.origin + "/tess/";
+
+if (NATIVE) {
+  const base = window.location.origin + "/tess";
 
   console.log("OCR base URL:", base);
 
-  fetch(base + "lang/eng.traineddata.gz")
-    .then(r => console.log("OCR language file status:", r.status))
-    .catch(e => console.error("OCR language file error:", e));
-  
   Object.assign(opts, {
-    workerPath: base + "worker.min.js",
-    corePath: base + "core/",
-    langPath: base + "lang/",
+    workerPath: base + "/worker.min.js",
+    corePath: base + "/core",
+    langPath: base + "/lang",
     workerBlobURL: false,
-    gzip: true
+    gzip: true,
+    cacheMethod: "none"
   });
+
+  // Check that the required offline files are accessible.
+  Promise.all([
+    "worker.min.js",
+    "core/tesseract-core.wasm.js",
+    "lang/eng.traineddata.gz"
+  ].map(async path => {
+    const response = await fetch(base + "/" + path);
+    console.log("OCR file:", path, "Status:", response.status);
+    if (!response.ok) {
+      throw new Error("OCR file missing: " + path);
+    }
+  })).catch(error => console.error("OCR file check failed:", error));
 }
+
 
     const worker=await Tesseract.createWorker("eng",1,opts);
     if(initTimedOut){try{await worker.terminate()}catch(_){}throw new Error("OCR initialization timed out. The worker was stopped; please try again.")}
