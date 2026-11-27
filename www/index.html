@@ -332,10 +332,19 @@ async function getOcrWorker(){
       else if(m.status==="recognizing text")setScanStatus("Reading label… "+Math.round((m.progress||0)*100)+"%");
     };
     const opts={logger,errorHandler:e=>{console.error("Tesseract worker error:",e);setScanStatus("OCR worker error: "+((e&&e.message)||String(e)))}};
-    if(NATIVE){
-      const A=p=>new URL(p,document.baseURI).href;
-      Object.assign(opts,{workerPath:A("tess/worker.min.js"),corePath:A("tess/core"),langPath:A("tess/lang"),workerBlobURL:false,gzip:true});
-    }
+
+if(NATIVE){
+  const base = new URL("tess/", document.baseURI).href;
+
+  Object.assign(opts, {
+    workerPath: base + "worker.min.js",
+    corePath: base + "core/",
+    langPath: base + "lang/",
+    workerBlobURL: false,
+    gzip: true
+  });
+}
+
     const worker=await Tesseract.createWorker("eng",1,opts);
     if(initTimedOut){try{await worker.terminate()}catch(_){}throw new Error("OCR initialization timed out. The worker was stopped; please try again.")}
     ocrWorker=worker;
