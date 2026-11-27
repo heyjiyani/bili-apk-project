@@ -32,17 +32,15 @@ jobs:
           sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' android/app/src/main/AndroidManifest.xml
       - name: App icon
         continue-on-error: true
-        run: npx capacitor-assets generate --android
-        - name: Verify OCR files in Android
-  run: |
-    ls -l android/app/src/main/assets/public/tess/lang/
+        run: npx capacitor-assets generate --android  
       - name: Copy web files into the app
         run: npx cap sync android
+     - name: Verify OCR files in Android
+     run: |
+    ls -l android/app/src/main/assets/public/tess/lang/
       - name: Build APK
         working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+        run: cd android && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: bili-apk
