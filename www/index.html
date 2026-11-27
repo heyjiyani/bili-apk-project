@@ -88,6 +88,17 @@ h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-backgro
 .nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom,0px));width:min(340px,calc(100% - 40px));display:flex;justify-content:space-around;background:var(--card);border-radius:30px;padding:8px;box-shadow:0 10px 40px rgba(30,20,60,.2);z-index:6}
 .nv{border:0;background:none;color:var(--mut);width:70px;height:50px;border-radius:22px;display:grid;place-items:center;cursor:pointer}
 .nv.on{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff}
+
+.photo-choice{position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:60;display:none;align-items:center;justify-content:center;padding:24px}
+.photo-choice-card{width:min(100%,360px);background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 18px 55px rgba(0,0,0,.45)}
+.photo-choice-card h3{color:var(--ink);margin:0 0 8px;font-size:20px;font-weight:800}
+.photo-choice-card p{color:var(--ink);opacity:.82;margin:0 0 18px;font-size:14px;line-height:1.5}
+.photo-choice-card button{display:block;width:100%;padding:15px;border-radius:13px;font-weight:700;font-size:16px;cursor:pointer}
+.photo-choice-primary{border:0;background:#7653e8;color:#fff;margin-bottom:10px}
+.photo-choice-secondary{border:1px solid var(--line);background:var(--key);color:var(--ink)}
+.photo-choice-cancel{border:0;background:transparent;color:var(--ink);opacity:.85;margin-top:8px}
+#scanmsg{color:var(--ink);background:var(--key);padding:10px 12px;border-radius:12px;line-height:1.45}
+
 </style>
 </head>
 <body>
@@ -144,13 +155,13 @@ h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-backgro
     <button class="u" id="camUp" style="flex:none;padding:12px 18px">Upload</button>
   </div>
 </div>
-<div id="photoChoice" style="position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:60;display:none;align-items:center;justify-content:center;padding:24px">
-  <div style="width:min(100%,360px);background:var(--card,#fff);color:var(--text,#222);border-radius:22px;padding:22px;box-shadow:0 18px 55px rgba(0,0,0,.3)">
-    <h3 style="margin:0 0 8px;font-size:19px">Add a photo</h3>
-    <p style="margin:0 0 18px;opacity:.72;font-size:14px">Choose where to get your item photo.</p>
-    <button id="chooseCamera" style="width:100%;padding:15px;border:0;border-radius:13px;background:#7653e8;color:white;font-weight:700;font-size:16px;margin-bottom:10px">📷 Take Photo</button>
-    <button id="chooseAlbum" style="width:100%;padding:15px;border:1px solid #aaa;border-radius:13px;background:transparent;color:inherit;font-weight:700;font-size:16px">🖼️ Choose from Album</button>
-    <button id="chooseCancel" style="width:100%;padding:12px;border:0;background:transparent;color:inherit;opacity:.7;margin-top:8px">Cancel</button>
+<div id="photoChoice" class="photo-choice" role="dialog" aria-modal="true" aria-labelledby="photoChoiceTitle">
+  <div class="photo-choice-card">
+    <h3 id="photoChoiceTitle">Add a photo</h3>
+    <p>Choose where to get your item photo.</p>
+    <button id="chooseCamera" class="photo-choice-primary">📷 Take Photo</button>
+    <button id="chooseAlbum" class="photo-choice-secondary">🖼️ Choose from Album</button>
+    <button id="chooseCancel" class="photo-choice-cancel">Cancel</button>
   </div>
 </div>
 <script>
@@ -289,9 +300,39 @@ function processImageFile(f){
   };scan(f);im.src=URL.createObjectURL(f);
 }
 $("file").onchange=e=>{const f=e.target.files[0];processImageFile(f);e.target.value=""};
-let tessP=null;
+let tessP=null,ocrWorker=null,ocrInit=null,ocrBusy=false;
 const NATIVE=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
-function loadTess(){if(NATIVE&&!window.Tesseract)return tessP||(tessP=new Promise((ok,no)=>{const s=document.createElement("script");s.src="tess/tesseract.min.js";s.onload=ok;s.onerror=()=>{tessP=null;no(new Error("load"))};document.head.appendChild(s)}));return tessP||(tessP=new Promise((ok,no)=>{if(window.Tesseract)return ok();const s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";s.onload=ok;s.onerror=()=>{tessP=null;no(new Error("load"))};document.head.appendChild(s)}))}
+function loadTess(){
+  if(window.Tesseract)return Promise.resolve();
+  if(tessP)return tessP;
+  tessP=new Promise((ok,no)=>{
+    const s=document.createElement("script");
+    s.src=NATIVE?"tess/tesseract.min.js":"https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+    s.onload=()=>window.Tesseract?ok():no(new Error("OCR library loaded but was not available"));
+    s.onerror=()=>{tessP=null;no(new Error(NATIVE?"Offline OCR files are missing from this APK":"Could not load OCR library. Check your internet connection."))};
+    document.head.appendChild(s);
+  });
+  return tessP;
+}
+function setScanStatus(t){const m=$("scanmsg");m.style.display="";m.textContent=t}
+async function getOcrWorker(){
+  if(ocrWorker)return ocrWorker;
+  if(ocrInit)return ocrInit;
+  ocrInit=(async()=>{
+    await loadTess();
+    const logger=m=>{
+      if(m.status==="loading tesseract core")setScanStatus("Preparing label reader…");
+      else if(m.status==="loading language traineddata")setScanStatus("Loading English text data…");
+      else if(m.status==="initializing tesseract")setScanStatus("Starting label reader…");
+      else if(m.status==="recognizing text")setScanStatus("Reading label… "+Math.round((m.progress||0)*100)+"%");
+    };
+    const opts={logger};
+    if(NATIVE){const A=p=>new URL(p,location.href).href;Object.assign(opts,{workerPath:A("tess/worker.min.js"),corePath:A("tess/core"),langPath:A("tess/lang"),workerBlobURL:false,gzip:true})}
+    ocrWorker=await Tesseract.createWorker("eng",1,opts);
+    return ocrWorker;
+  })();
+  try{return await ocrInit}catch(e){ocrInit=null;ocrWorker=null;throw e}
+}
 function parseLabel(t){
   const lines=t.split(/\n+/).map(x=>x.trim()).filter(Boolean);
   const cand=[];const re=/(₱|php|p)?\s*(\d{1,5}[.,]\d{2})(?!\d)/gi;let m;
@@ -305,30 +346,33 @@ function parseLabel(t){
   return{name:best,price:pr,unit:u};
 }
 async function scan(f){
-  const m=$("scanmsg");m.style.display="";m.textContent="Reading the label… (the first time on the web version needs internet)";
+  if(!f||ocrBusy)return;
+  ocrBusy=true;
+  let timer=null,timedOut=false;
   try{
-    await loadTess();
-    const im=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=no;i.src=URL.createObjectURL(f)});
-    const c=document.createElement("canvas"),s=Math.min(1,1600/Math.max(im.width,im.height));
-    c.width=im.width*s;c.height=im.height*s;const x=c.getContext("2d");x.drawImage(im,0,0,c.width,c.height);
-    const d=x.getImageData(0,0,c.width,c.height),p=d.data;
-    for(let i=0;i<p.length;i+=4){let g=(p[i]*.3+p[i+1]*.59+p[i+2]*.11);g=Math.max(0,Math.min(255,(g-110)*1.5+110));p[i]=p[i+1]=p[i+2]=g}
+    setScanStatus("Preparing photo for label reading…");
+    const im=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>no(new Error("Could not open this photo"));i.src=URL.createObjectURL(f)});
+    const c=document.createElement("canvas"),scale=Math.min(1,1400/Math.max(im.width,im.height));
+    c.width=Math.max(1,Math.round(im.width*scale));c.height=Math.max(1,Math.round(im.height*scale));
+    const x=c.getContext("2d");x.drawImage(im,0,0,c.width,c.height);
+    const d=x.getImageData(0,0,c.width,c.height),px=d.data;
+    for(let i=0;i<px.length;i+=4){const g=(px[i]*.3+px[i+1]*.59+px[i+2]*.11);const v=Math.max(0,Math.min(255,(g-105)*1.35+125));px[i]=px[i+1]=px[i+2]=v}
     x.putImageData(d,0,0);
-    let r;
-    if(NATIVE){const A=p=>new URL(p,location.href).href;
-      const w=await Tesseract.createWorker("eng",1,{workerPath:A("tess/worker.min.js"),corePath:A("tess/core"),langPath:A("tess/lang"),workerBlobURL:false,gzip:true});
-      try{r=await w.recognize(c)}finally{await w.terminate()}}
-    else r=await Tesseract.recognize(c,"eng");
-    const j=parseLabel(r.data.text||"");
+    setScanStatus("Starting label reader… The first scan may take a little longer.");
+    const w=await getOcrWorker();
+    setScanStatus("Reading label… 0%");
+    const result=await Promise.race([w.recognize(c),new Promise((_,reject)=>{timer=setTimeout(()=>{timedOut=true;reject(new Error("This photo is taking too long to read"))},90000)})]);
+    const j=parseLabel(result.data.text||"");
     if(j.name)$("iname").value=j.name;
     if(j.price!=null)price=String(j.price);
-    unit=j.unit;qty=UNITS[unit].min;
-    upd();sug();
-    m.textContent=(j.name||j.price!=null)?"Read from label. Please check it, set the quantity, then tap ✓.":"Couldn’t read the label. Try a closer, brighter photo.";
+    unit=j.unit;qty=UNITS[unit].min;upd();sug();
+    setScanStatus((j.name||j.price!=null)?"Label read. Please check the item name and price, then tap ✓ to save.":"I couldn't find a clear item name or price. Try a closer, brighter photo, or enter them manually.");
   }catch(e){
-    m.textContent="Couldn’t read the label ("+((e&&e.message)||e)+"). Try a closer, brighter photo or type it in.";
-  }
+    if(timedOut&&ocrWorker){try{await ocrWorker.terminate()}catch(_){}ocrWorker=null;ocrInit=null}
+    setScanStatus("Label reading failed: "+((e&&e.message)||"Unknown error")+". You can still enter the item and price manually.");
+  }finally{if(timer)clearTimeout(timer);ocrBusy=false}
 }
+
 let editing=null,tab="lists",sugs=[],per="last",view="items",lay="grid",srt="new",flt="all",fs="",ff="",ft="";
 const nk=(n,u)=>n.toLowerCase().trim()+"|"+(u==="gram"?"kilo":u);
 const lm=l=>{const s=$("gsearch").value.trim().toLowerCase();return !s||l.name.toLowerCase().includes(s)||l.items.some(i=>i.name.toLowerCase().includes(s))};
