@@ -332,9 +332,8 @@ async function getOcrWorker(){
       else if(m.status==="recognizing text")setScanStatus("Reading label… "+Math.round((m.progress||0)*100)+"%");
     };
     const opts={logger,errorHandler:e=>{console.error("Tesseract worker error:",e);setScanStatus("OCR worker error: "+((e&&e.message)||String(e)))}};
-
 if(NATIVE){
-  const base = new URL("tess/", document.baseURI).href;
+  const base = window.location.origin + "/tess/";
 
   Object.assign(opts, {
     workerPath: base + "worker.min.js",
