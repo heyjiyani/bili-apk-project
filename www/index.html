@@ -335,6 +335,12 @@ async function getOcrWorker(){
 if(NATIVE){
   const base = window.location.origin + "/tess/";
 
+  console.log("OCR base URL:", base);
+
+  fetch(base + "lang/eng.traineddata.gz")
+    .then(r => console.log("OCR language file status:", r.status))
+    .catch(e => console.error("OCR language file error:", e));
+  
   Object.assign(opts, {
     workerPath: base + "worker.min.js",
     corePath: base + "core/",
