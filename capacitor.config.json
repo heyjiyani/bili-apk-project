@@ -1,0 +1,6 @@
+{
+  "appId": "com.bili.shopping",
+  "appName": "Bili",
+  "webDir": "www",
+  "server": { "androidScheme": "https" }
+}
