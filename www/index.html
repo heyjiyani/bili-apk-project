@@ -307,9 +307,12 @@ function loadTess(){
   if(tessP)return tessP;
   tessP=new Promise((ok,no)=>{
     const s=document.createElement("script");
+    let settled=false;
+    const fail=e=>{if(settled)return;settled=true;clearTimeout(timer);tessP=null;s.remove();no(e)};
+    const timer=setTimeout(()=>fail(new Error("The OCR library did not load within 20 seconds. Please close and reopen the app, then try again.")),20000);
     s.src=NATIVE?"tess/tesseract.min.js":"https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
-    s.onload=()=>window.Tesseract?ok():no(new Error("OCR library loaded but was not available"));
-    s.onerror=()=>{tessP=null;no(new Error(NATIVE?"Offline OCR files are missing from this APK":"Could not load OCR library. Check your internet connection."))};
+    s.onload=()=>{if(settled)return;settled=true;clearTimeout(timer);if(window.Tesseract)ok();else{tessP=null;no(new Error("OCR library loaded but was not available"))}};
+    s.onerror=()=>fail(new Error(NATIVE?"Could not open the offline OCR library (tess/tesseract.min.js). Rebuild the APK and try again.":"Could not load OCR library. Check your internet connection."));
     document.head.appendChild(s);
   });
   return tessP;
@@ -318,20 +321,32 @@ function setScanStatus(t){const m=$("scanmsg");m.style.display="";m.textContent=
 async function getOcrWorker(){
   if(ocrWorker)return ocrWorker;
   if(ocrInit)return ocrInit;
-  ocrInit=(async()=>{
+  let initTimedOut=false,initTimer=null;
+  const initTask=(async()=>{
     await loadTess();
+    setScanStatus("Preparing the OCR engine…");
     const logger=m=>{
-      if(m.status==="loading tesseract core")setScanStatus("Preparing label reader…");
+      if(m.status==="loading tesseract core")setScanStatus("Loading OCR recognition engine…");
       else if(m.status==="loading language traineddata")setScanStatus("Loading English text data…");
       else if(m.status==="initializing tesseract")setScanStatus("Starting label reader…");
       else if(m.status==="recognizing text")setScanStatus("Reading label… "+Math.round((m.progress||0)*100)+"%");
     };
-    const opts={logger};
-    if(NATIVE){const A=p=>new URL(p,location.href).href;Object.assign(opts,{workerPath:A("tess/worker.min.js"),corePath:A("tess/core"),langPath:A("tess/lang"),workerBlobURL:false,gzip:true})}
-    ocrWorker=await Tesseract.createWorker("eng",1,opts);
-    return ocrWorker;
+    const opts={logger,errorHandler:e=>{console.error("Tesseract worker error:",e);setScanStatus("OCR worker error: "+((e&&e.message)||String(e)))}};
+    if(NATIVE){
+      const A=p=>new URL(p,document.baseURI).href;
+      Object.assign(opts,{workerPath:A("tess/worker.min.js"),corePath:A("tess/core"),langPath:A("tess/lang"),workerBlobURL:false,gzip:true});
+    }
+    const worker=await Tesseract.createWorker("eng",1,opts);
+    if(initTimedOut){try{await worker.terminate()}catch(_){}throw new Error("OCR initialization timed out. The worker was stopped; please try again.")}
+    ocrWorker=worker;
+    return worker;
   })();
-  try{return await ocrInit}catch(e){ocrInit=null;ocrWorker=null;throw e}
+  ocrInit=Promise.race([initTask,new Promise((_,reject)=>{
+    initTimer=setTimeout(()=>{initTimedOut=true;reject(new Error("The label reader could not finish loading within 90 seconds. The English language data or OCR engine may be blocked by Android. Please try again; if it repeats, send this error message."))},90000);
+  })]);
+  try{return await ocrInit}
+  catch(e){ocrInit=null;if(ocrWorker){try{await ocrWorker.terminate()}catch(_){}ocrWorker=null}throw e}
+  finally{if(initTimer)clearTimeout(initTimer)}
 }
 function parseLabel(t){
   const lines=t.split(/\n+/).map(x=>x.trim()).filter(Boolean);
